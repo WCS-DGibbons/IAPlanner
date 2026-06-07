@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IASim — Industrial Automation Cabinet Designer &amp; Simulator</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header id="toolbar">
+    <div class="brand">
+      <span class="logo">⚙</span>
+      <div>
+        <div class="title">IASim</div>
+        <div class="subtitle">Cabinet Designer &amp; PLC Simulator</div>
+      </div>
+    </div>
+
+    <div class="tool-group" id="mode-group">
+      <button data-mode="select" class="mode-btn active" title="Select / move components (V)">▣ Select</button>
+      <button data-mode="wire" class="mode-btn" title="Draw cables between terminals (W)">⌇ Wire</button>
+    </div>
+
+    <div class="tool-group">
+      <button id="add-rail-btn" title="Add a DIN rail">+ DIN Rail</button>
+      <button id="delete-btn" title="Delete selection (Del)">🗑 Delete</button>
+    </div>
+
+    <div class="tool-group sim-group">
+      <button id="run-btn" class="run" title="Start simulation (Space)">▶ Run</button>
+      <button id="stop-btn" class="stop" disabled title="Stop simulation">■ Stop</button>
+      <span id="scan-info" class="scan-info">stopped</span>
+    </div>
+
+    <div class="tool-group right">
+      <button id="save-btn" title="Save project to file">💾 Save</button>
+      <button id="load-btn" title="Load project from file">📂 Load</button>
+      <button id="clear-btn" title="New / clear project">✦ New</button>
+      <input type="file" id="load-input" accept=".json,application/json" hidden />
+    </div>
+  </header>
+
+  <main>
+    <aside id="palette">
+      <div class="panel-title">Component Library</div>
+      <div id="palette-list"></div>
+    </aside>
+
+    <section id="stage-wrap">
+      <svg id="stage" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="stage-hint" class="stage-hint"></div>
+    </section>
+
+    <aside id="inspector">
+      <nav id="inspector-tabs">
+        <button data-tab="props" class="tab active">Properties</button>
+        <button data-tab="program" class="tab">PLC Program</button>
+        <button data-tab="io" class="tab">I/O &amp; Tags</button>
+        <button data-tab="checks" class="tab">Checks <span id="checks-badge" class="badge"></span></button>
+      </nav>
+      <div id="tab-props" class="tab-body active"></div>
+      <div id="tab-program" class="tab-body"></div>
+      <div id="tab-io" class="tab-body"></div>
+      <div id="tab-checks" class="tab-body"></div>
+    </aside>
+  </main>
+
+  <footer id="statusbar">
+    <span id="status-msg">Ready. Drag a component from the library onto a DIN rail.</span>
+    <span id="status-coords"></span>
+  </footer>
+
+  <!-- Core (load order matters: no bundler, global IASim namespace) -->
+  <script src="js/util.js"></script>
+  <script src="js/catalog.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/sim/nets.js"></script>
+  <script src="js/sim/validate.js"></script>
+  <script src="js/plc/ladder.js"></script>
+  <script src="js/plc/st.js"></script>
+  <script src="js/sim/engine.js"></script>
+  <script src="js/designer.js"></script>
+  <script src="js/wiring.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

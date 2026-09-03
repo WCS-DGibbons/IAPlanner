@@ -55,6 +55,74 @@ triggering flow through the cabinet live. Press **✦ New** to return to this la
   energized (e.g. switched by a relay or PLC output). The rod extends / the vent flap
   opens on screen, with a status LED.
 
+### Full sensor & switch library
+
+Every device below appears in the **Component Library** on the left. Drag one onto
+the canvas, then select it to drive its reading from **Properties** while the
+simulation runs.
+
+**Analog sensors** (`Field · Analog` and `Field · Process`) all wire the same way:
+`+` to 24V, `−` to 0V, and `AO` to one of the M-Duino's analog inputs `AI0`–`AI3`.
+The tag then reads as a real number you can compare against in Structured Text
+(`IF AI0 > 800.0 THEN …`).
+
+| Sensor | Reads | Range | Group |
+|---|---|---|---|
+| Temperature Sensor | Air temperature | −10 to 50 °C | Analog |
+| Humidity Sensor | Relative humidity | 0–100 %RH | Analog |
+| Leaf Moisture Sensor | Leaf wetness | 0–100 % | Analog |
+| CO₂ Sensor | Carbon-dioxide concentration | 300–2000 ppm | Analog |
+| Light / PAR Sensor | Photosynthetically active light | 0–2000 µmol/m²/s | Analog |
+| Soil Moisture Sensor | Volumetric water content | 0–60 %VWC | Analog |
+| Soil Temperature Sensor | Root-zone temperature | 0–45 °C | Analog |
+| pH Sensor | Nutrient acidity | 0–14 pH | Analog |
+| EC Sensor | Nutrient strength (electrical conductivity) | 0–5 mS/cm | Analog |
+| Wind Speed Sensor | Anemometer | 0–40 m/s | Analog |
+| Pressure Transmitter | Line pressure | 0–16 bar | Process |
+| Flow Meter | Flow rate | 0–200 L/min | Process |
+| Tank Level Sensor | Continuous level | 0–100 % | Process |
+| Current Transducer | Motor current | 0–50 A | Process |
+| Load Cell | Weight | 0–500 kg | Process |
+| 0–10V Transmitter | Any generic analog signal | 0–10 V | Process |
+
+**PAR** is *photosynthetically active radiation* — the light plants actually use for
+photosynthesis. **EC** is *electrical conductivity*, the standard way to measure how
+much fertiliser is dissolved in irrigation water.
+
+**Digital switches** (`Field · Input`) are **dry contacts**: a bare pair of terminals
+with no supply of its own, exactly like a real float or limit switch. Feed one side
+from 24V and take the other side to a digital input `I0.0`–`I0.2`. The tag reads
+true when the contact is closed.
+
+| Switch | Closes when | Wiring |
+|---|---|---|
+| Float Switch | Tank level rises (float up) | 2-wire dry contact |
+| Limit Switch | Something reaches end of travel | 2-wire dry contact |
+| Flow Switch | Flow is present in the pipe | 2-wire dry contact |
+| Pressure Switch | Pressure rises above setpoint | 2-wire dry contact |
+| Rain Detector | The sensing plate gets wet | 2-wire dry contact |
+| Door / Gate Switch | Door is **shut** — normally closed, opens when the door opens | 2-wire dry contact |
+| Photoelectric Sensor | A target breaks the beam | 3-wire PNP: `+`, `-`, `out` |
+
+**Safety & alarm devices** (`Field · Safety`) are aimed at interlock logic — the
+rungs that stop a machine rather than run it.
+
+| Device | Output | Wiring |
+|---|---|---|
+| Smoke / Heat Detector | `ALM` goes 24V on alarm | 3-wire, needs 24V |
+| Gas Detector | `ALM` goes 24V on alarm | 3-wire, needs 24V |
+| Safety Light Curtain | `OSSD` is 24V **while the field is clear**, and drops out when the beam is broken | 3-wire, needs 24V |
+| Thermostat Contact | Contact closes when calling | 2-wire dry contact |
+
+The light curtain follows the real **fail-safe** convention: the signal is *on* during
+normal operation and *off* during the dangerous condition, so a broken wire stops the
+machine instead of hiding the fault. Wire it into a permissive, not a trip —
+`R0.0 := I0.1;` rather than `R0.0 := NOT I0.1;`.
+
+> The M-Duino has **4 analog inputs** (`AI0`–`AI3`) and **3 digital inputs**
+> (`I0.0`–`I0.2`), so that is how many sensors one PLC can read at a time. Delete a
+> sensor you are not using to free its input, or add a second controller.
+
 ## What you can do
 
 ### 1. Design the cabinet
@@ -167,3 +235,15 @@ Add a new part by appending one entry to the `CATALOG` array in
 [`js/catalog.js`](js/catalog.js): declare its size, terminals (with a `kind` such as
 `source24`, `gnd`, `in`, `out`, `sigout`, `pwr`, `pass`) and a `behavior`. The
 designer, wiring, and simulator pick it up automatically.
+
+A few optional keys tune how the part presents itself — all safe to leave out:
+
+| Key | Does what | Default |
+|---|---|---|
+| `props.step` | Slider increment for an analog sensor | `10^-decimals` |
+| `props.shortUnit` | Compact unit for the on-canvas reading (e.g. `µmol` for `µmol/m²/s`) | `props.unit` |
+| `sensorLabels` | `{ on, off }` wording on a 3-wire sensor's toggle button | `TARGET DETECTED` / `NO TARGET` |
+| `switchLabels` | `{ closed, open }` wording on a dry-contact switch's toggle button | `ON` / `OFF` |
+
+A reading that is too wide for its box is shrunk to fit automatically, so a long
+unit will not spill over the part.

@@ -154,8 +154,8 @@
       if (def.behavior === "asensor") {
         const txt = U.svg("text", {
           class: "sensor-readout", x: def.w / 2, y: def.h / 2 + 6, "text-anchor": "middle",
-          text: formatSensor(def, comp),
         });
+        fitReadout(txt, def, formatSensor(def, comp));
         g.appendChild(txt);
         this.els.readouts.set(comp.uid, { el: txt, def });
       }
@@ -266,7 +266,7 @@
     setReadout(uid) {
       const r = this.els.readouts.get(uid);
       const comp = S.getComponent(uid);
-      if (r && comp) r.el.textContent = formatSensor(r.def, comp);
+      if (r && comp) fitReadout(r.el, r.def, formatSensor(r.def, comp));
     },
 
     // ---------------- interaction ----------------
@@ -433,8 +433,18 @@
   function formatSensor(def, comp) {
     const v = comp.state && typeof comp.state.value === "number" ? comp.state.value : 0;
     const d = (def.props && def.props.decimals) || 0;
-    const u = (def.props && def.props.unit) || "";
+    // shortUnit keeps wide units (e.g. µmol/m²/s) readable on the small canvas box
+    const u = (def.props && (def.props.shortUnit || def.props.unit)) || "";
     return v.toFixed(d) + " " + u;
+  }
+
+  // Write a sensor reading into its box, shrinking the text if it would overflow.
+  // The 0.62 factor is the approximate character width of the mono face per 1px
+  // of font size; inline style is used so it beats the .sensor-readout class rule.
+  function fitReadout(el, def, text) {
+    el.textContent = text;
+    const size = Math.max(7, Math.min(13, (def.w - 8) / (text.length * 0.62)));
+    el.style.fontSize = size.toFixed(1) + "px";
   }
 
   // orthogonal-ish cable routing with a gentle curve

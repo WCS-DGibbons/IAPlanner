@@ -181,19 +181,26 @@
       }
       if (b === "selector") {
         const nc = def.normallyClosed;
-        wrap.appendChild(U.el("div", { class: "label", text: nc ? "E-Stop (NC)" : "Selector Switch" }));
+        const L = def.switchLabels || {};
+        wrap.appendChild(U.el("div", { class: "label", text: def.name }));
         const btn = U.el("button", { class: "toggle-btn" });
         const render = () => {
           btn.classList.toggle("on", comp.state.closed);
-          btn.textContent = comp.state.closed ? (nc ? "RELEASED (closed)" : "ON") : (nc ? "PUSHED (open)" : "OFF");
+          btn.textContent = comp.state.closed
+            ? (L.closed || (nc ? "RELEASED (closed)" : "ON"))
+            : (L.open || (nc ? "PUSHED (open)" : "OFF"));
         };
         btn.addEventListener("click", () => { comp.state.closed = !comp.state.closed; render(); this.refreshAfterInput(); });
         render(); wrap.appendChild(btn); return wrap;
       }
       if (b === "sensor") {
-        wrap.appendChild(U.el("div", { class: "label", text: "Proximity Sensor" }));
+        const L = def.sensorLabels || {};
+        wrap.appendChild(U.el("div", { class: "label", text: def.name }));
         const btn = U.el("button", { class: "toggle-btn" });
-        const render = () => { btn.classList.toggle("on", comp.state.detected); btn.textContent = comp.state.detected ? "TARGET DETECTED" : "NO TARGET"; };
+        const render = () => {
+          btn.classList.toggle("on", comp.state.detected);
+          btn.textContent = comp.state.detected ? (L.on || "TARGET DETECTED") : (L.off || "NO TARGET");
+        };
         btn.addEventListener("click", () => { comp.state.detected = !comp.state.detected; render(); this.refreshAfterInput(); });
         render(); wrap.appendChild(btn); return wrap;
       }
@@ -210,8 +217,9 @@
         const fmt = () => (comp.state.value || 0).toFixed(p.decimals || 0) + " " + (p.unit || "");
         wrap.appendChild(U.el("div", { class: "label" }, ["Measured value", val]));
         val.textContent = fmt();
+        const step = p.step || Math.pow(10, -(p.decimals || 0));
         const slider = U.el("input", { type: "range", min: p.min, max: p.max,
-          step: (p.decimals ? 0.1 : 1), value: comp.state.value });
+          step: step, value: comp.state.value });
         slider.style.width = "100%";
         slider.addEventListener("input", () => {
           comp.state.value = parseFloat(slider.value);

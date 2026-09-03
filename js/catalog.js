@@ -11,6 +11,12 @@
  *   pass     : passive node (switches, loads, terminal blocks)
  *
  * behavior drives the simulation in sim/engine.js.
+ *
+ * Optional keys read by the UI (all safe to omit):
+ *   props.step      : slider step for an analog sensor (default: 10^-decimals)
+ *   props.shortUnit : compact unit for the on-canvas readout (default: props.unit)
+ *   sensorLabels    : { on, off }     wording for a 3-wire sensor's toggle button
+ *   switchLabels    : { closed, open } wording for a dry-contact switch's toggle
  */
 (function () {
   "use strict";
@@ -222,6 +228,264 @@
       ],
       props: { unit: "%", min: 0, max: 100, decimals: 0 }, defaultState: { value: 35 },
       indicator: { color: "#ebcb8b", source: "P" },
+    },
+
+    // ---------------- ANALOG SENSORS (greenhouse / horticulture) ----------------
+    {
+      id: "co2", name: "CO₂ Sensor", category: "Field · Analog", desc: "Analog ppm · needs 24V",
+      w: M * 3.6, h: 80, color: "#d08770", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "ppm", min: 300, max: 2000, decimals: 0 }, defaultState: { value: 420 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "par", name: "Light / PAR Sensor", category: "Field · Analog", desc: "Photosynthetic light · needs 24V",
+      w: M * 3.6, h: 80, color: "#ebcb8b", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "µmol/m²/s", shortUnit: "µmol", min: 0, max: 2000, decimals: 0 },
+      defaultState: { value: 350 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "soilmoist", name: "Soil Moisture Sensor", category: "Field · Analog", desc: "Volumetric water content · needs 24V",
+      w: M * 3.6, h: 80, color: "#a3be8c", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "%VWC", min: 0, max: 60, decimals: 1 }, defaultState: { value: 28 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "soiltemp", name: "Soil Temperature Sensor", category: "Field · Analog", desc: "Root-zone °C · needs 24V",
+      w: M * 3.6, h: 80, color: "#bf616a", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "°C", min: 0, max: 45, decimals: 1 }, defaultState: { value: 18.5 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "ph", name: "pH Sensor", category: "Field · Analog", desc: "Nutrient acidity · needs 24V",
+      w: M * 3.6, h: 80, color: "#b48ead", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "pH", min: 0, max: 14, decimals: 2 }, defaultState: { value: 6.2 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "ec", name: "EC Sensor", category: "Field · Analog", desc: "Nutrient strength mS/cm · needs 24V",
+      w: M * 3.6, h: 80, color: "#88c0d0", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "mS/cm", min: 0, max: 5, decimals: 2 }, defaultState: { value: 1.8 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "wind", name: "Wind Speed Sensor", category: "Field · Analog", desc: "Anemometer m/s · needs 24V",
+      w: M * 3.6, h: 80, color: "#81a1c1", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "m/s", min: 0, max: 40, decimals: 1 }, defaultState: { value: 3.5 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+
+    // ---------------- ANALOG SENSORS (general process) ----------------
+    {
+      id: "pressure", name: "Pressure Transmitter", category: "Field · Process", desc: "Line pressure bar · needs 24V",
+      w: M * 3.6, h: 80, color: "#5e81ac", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "bar", min: 0, max: 16, decimals: 2 }, defaultState: { value: 4 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "flow", name: "Flow Meter", category: "Field · Process", desc: "Litres per minute · needs 24V",
+      w: M * 3.6, h: 80, color: "#88c0d0", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "L/min", min: 0, max: 200, decimals: 1 }, defaultState: { value: 45 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "tanklevel", name: "Tank Level Sensor", category: "Field · Process", desc: "Continuous level % · needs 24V",
+      w: M * 3.6, h: 80, color: "#81a1c1", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "%", min: 0, max: 100, decimals: 0 }, defaultState: { value: 60 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "current", name: "Current Transducer", category: "Field · Process", desc: "Motor current amps · needs 24V",
+      w: M * 3.6, h: 80, color: "#ebcb8b", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "A", min: 0, max: 50, decimals: 1 }, defaultState: { value: 6 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "loadcell", name: "Load Cell", category: "Field · Process", desc: "Weight kg · needs 24V",
+      w: M * 3.6, h: 80, color: "#d08770", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "kg", min: 0, max: 500, decimals: 1 }, defaultState: { value: 120 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+    {
+      id: "xmitter", name: "0–10V Transmitter", category: "Field · Process", desc: "Generic analog signal · needs 24V",
+      w: M * 3.6, h: 80, color: "#4c566a", railMount: false, behavior: "asensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("S", "AO", "aout", "right", 0.5),
+      ],
+      props: { unit: "V", min: 0, max: 10, decimals: 2 }, defaultState: { value: 5 },
+      indicator: { color: "#ebcb8b", source: "P" },
+    },
+
+    // ---------------- DIGITAL SWITCHES (dry contacts — no supply needed) ----------------
+    {
+      id: "floatsw", name: "Float Switch", category: "Field · Input", desc: "Tank level dry contact",
+      w: M * 2.4, h: 72, color: "#5e81ac", railMount: false, behavior: "selector",
+      terminals: [ T("1", "1", "pass", "left", 0.5), T("2", "2", "pass", "right", 0.5) ],
+      bridge: [["1", "2"]], defaultState: { closed: false },
+      switchLabels: { closed: "FLOAT UP (full)", open: "FLOAT DOWN (empty)" },
+      indicator: { color: "#5e81ac", source: "2" },
+    },
+    {
+      id: "limitsw", name: "Limit Switch", category: "Field · Input", desc: "End-of-travel dry contact",
+      w: M * 2.4, h: 72, color: "#4c566a", railMount: false, behavior: "selector",
+      terminals: [ T("1", "1", "pass", "left", 0.5), T("2", "2", "pass", "right", 0.5) ],
+      bridge: [["1", "2"]], defaultState: { closed: false },
+      switchLabels: { closed: "ACTUATED (closed)", open: "FREE (open)" },
+      indicator: { color: "#a3be8c", source: "2" },
+    },
+    {
+      id: "flowsw", name: "Flow Switch", category: "Field · Input", desc: "Flow present dry contact",
+      w: M * 2.4, h: 72, color: "#88c0d0", railMount: false, behavior: "selector",
+      terminals: [ T("1", "1", "pass", "left", 0.5), T("2", "2", "pass", "right", 0.5) ],
+      bridge: [["1", "2"]], defaultState: { closed: false },
+      switchLabels: { closed: "FLOW OK (closed)", open: "NO FLOW (open)" },
+      indicator: { color: "#88c0d0", source: "2" },
+    },
+    {
+      id: "pressuresw", name: "Pressure Switch", category: "Field · Input", desc: "Setpoint dry contact",
+      w: M * 2.4, h: 72, color: "#81a1c1", railMount: false, behavior: "selector",
+      terminals: [ T("1", "1", "pass", "left", 0.5), T("2", "2", "pass", "right", 0.5) ],
+      bridge: [["1", "2"]], defaultState: { closed: false },
+      switchLabels: { closed: "ABOVE SETPOINT (closed)", open: "BELOW SETPOINT (open)" },
+      indicator: { color: "#81a1c1", source: "2" },
+    },
+    {
+      id: "doorsw", name: "Door / Gate Switch", category: "Field · Input", desc: "NC — opens when door opens",
+      w: M * 2.4, h: 72, color: "#a3be8c", railMount: false, behavior: "selector",
+      terminals: [ T("1", "1", "pass", "left", 0.5), T("2", "2", "pass", "right", 0.5) ],
+      bridge: [["1", "2"]], defaultState: { closed: true }, normallyClosed: true,
+      switchLabels: { closed: "DOOR SHUT (closed)", open: "DOOR OPEN (circuit broken)" },
+      indicator: { color: "#a3be8c", source: "2" },
+    },
+    {
+      id: "rain", name: "Rain Detector", category: "Field · Input", desc: "Wet/dry dry contact",
+      w: M * 2.4, h: 72, color: "#5e81ac", railMount: false, behavior: "selector",
+      terminals: [ T("1", "1", "pass", "left", 0.5), T("2", "2", "pass", "right", 0.5) ],
+      bridge: [["1", "2"]], defaultState: { closed: false },
+      switchLabels: { closed: "RAIN DETECTED (closed)", open: "DRY (open)" },
+      indicator: { color: "#88c0d0", source: "2" },
+    },
+    {
+      id: "photoeye", name: "Photoelectric Sensor", category: "Field · Input", desc: "3-wire beam sensor (needs 24V)",
+      w: M * 2.8, h: 72, color: "#ebcb8b", railMount: false, behavior: "sensor",
+      terminals: [
+        T("BN", "+ (BN)", "pwr", "left", 0.25),
+        T("BU", "- (BU)", "gnd", "left", 0.75),
+        T("BK", "out (BK)", "sigout", "right", 0.5),
+      ],
+      defaultState: { detected: false },
+      sensorLabels: { on: "TARGET DETECTED (beam broken)", off: "BEAM CLEAR" },
+      indicator: { color: "#ebcb8b", source: "BK" },
+    },
+
+    // ---------------- SAFETY & ALARM DEVICES ----------------
+    {
+      id: "smoke", name: "Smoke / Heat Detector", category: "Field · Safety", desc: "Alarm output (needs 24V)",
+      w: M * 3, h: 76, color: "#bf616a", railMount: false, behavior: "sensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("AL", "ALM", "sigout", "right", 0.5),
+      ],
+      defaultState: { detected: false },
+      sensorLabels: { on: "ALARM — SMOKE / HEAT", off: "NORMAL" },
+      indicator: { color: "#bf616a", source: "AL" },
+    },
+    {
+      id: "gas", name: "Gas Detector", category: "Field · Safety", desc: "Gas alarm output (needs 24V)",
+      w: M * 3, h: 76, color: "#d08770", railMount: false, behavior: "sensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("AL", "ALM", "sigout", "right", 0.5),
+      ],
+      defaultState: { detected: false },
+      sensorLabels: { on: "GAS ALARM", off: "ATMOSPHERE CLEAR" },
+      indicator: { color: "#d08770", source: "AL" },
+    },
+    {
+      id: "curtain", name: "Safety Light Curtain", category: "Field · Safety", desc: "Fail-safe — output ON while clear",
+      w: M * 4, h: 84, color: "#ebcb8b", railMount: false, behavior: "sensor",
+      terminals: [
+        T("P", "+", "pwr", "left", 0.25),
+        T("N", "−", "gnd", "left", 0.75),
+        T("OSSD", "OSSD", "sigout", "right", 0.5),
+      ],
+      // Fail-safe convention: the output is ON while the field is CLEAR, and drops
+      // out when the beam is broken — so a broken wire also stops the machine.
+      defaultState: { detected: true },
+      sensorLabels: { on: "CLEAR — OSSD ON", off: "BEAM BROKEN — OSSD OFF" },
+      indicator: { color: "#ebcb8b", source: "OSSD" },
+    },
+    {
+      id: "thermostat", name: "Thermostat Contact", category: "Field · Safety", desc: "Over-temperature dry contact",
+      w: M * 2.4, h: 72, color: "#bf616a", railMount: false, behavior: "selector",
+      terminals: [ T("1", "1", "pass", "left", 0.5), T("2", "2", "pass", "right", 0.5) ],
+      bridge: [["1", "2"]], defaultState: { closed: false },
+      switchLabels: { closed: "CALLING (closed)", open: "SATISFIED (open)" },
+      indicator: { color: "#bf616a", source: "2" },
     },
 
     // ---------------- ACTUATORS / OUTPUT ----------------

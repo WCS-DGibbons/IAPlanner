@@ -244,8 +244,14 @@ usually sold — one address, several readings:
   a cable. You can also click-drag between terminals.
 - **Cancel an in-progress cable** with `Esc`, a **right-click**, or by clicking empty
   space.
-- Cable colour follows the source terminal (red = +24V, grey = 0V, blue = signal),
-  and editable per cable.
+- Cable colour follows the source terminal (red = +24V, grey = 0V, blue = signal,
+  purple = RS-485 data pair), and editable per cable.
+- Cables are routed like real cabinet wiring: a short stub straight out of the
+  terminal, then runs that are only ever **horizontal, vertical, or a 45° diagonal**
+  — no other angles and no curves — with corners cut at 45° rather than squared off.
+- Cables **route around** components rather than across them, and are drawn
+  underneath parts, so nothing important disappears behind a box. Move a part and
+  its cables re-route themselves the moment you let go of it.
 - During simulation, **24V cables glow orange** and **live 240V cables glow red** so
   you can see power flow and spot where mains voltage reaches.
 

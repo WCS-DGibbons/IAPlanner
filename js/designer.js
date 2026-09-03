@@ -18,6 +18,7 @@
     view: { vx: -20, vy: -20, vw: 1000, vh: 620 },
     els: { wires: new Map(), terms: new Map(), leds: new Map(), comps: new Map(), readouts: new Map() },
     drag: null, // active interaction
+    fastRouting: false, // skip obstacle avoidance while dragging (see routePath)
 
     init(svg) {
       this.svg = svg;
@@ -219,9 +220,27 @@
       return { x: comp.x + off.x, y: comp.y + off.y };
     },
 
+    // position plus the edge the terminal sits on and the part it belongs to —
+    // the router needs both to leave the terminal squarely and to know which
+    // components it is allowed to run across
+    terminalAnchor(compUid, termId) {
+      const comp = S.getComponent(compUid);
+      if (!comp) return { x: 0, y: 0, side: null, comp: null };
+      const def = cat.byId[comp.typeId];
+      const t = def.terminals.find((x) => x.id === termId);
+      if (!t) return { x: comp.x, y: comp.y, side: null, comp: compUid };
+      const off = cat.terminalOffset(def, t);
+      return { x: comp.x + off.x, y: comp.y + off.y, side: t.side, comp: compUid };
+    },
+
+    // route to a loose end (the cursor, while a cable is being drawn)
+    previewPath(a, p) {
+      return routePath(a, { x: p.x, y: p.y, side: null, comp: null });
+    },
+
     renderWire(w) {
-      const a = this.terminalPos(w.a.comp, w.a.term);
-      const b = this.terminalPos(w.b.comp, w.b.term);
+      const a = this.terminalAnchor(w.a.comp, w.a.term);
+      const b = this.terminalAnchor(w.b.comp, w.b.term);
       const d = routePath(a, b);
       const g = U.svg("g", { class: "wire-group", "data-wire": w.id });
       g.appendChild(U.svg("path", { class: "wire-hit", d }));
@@ -316,6 +335,7 @@
         S.select("comp", uid);
         const comp = S.getComponent(uid);
         this.drag = { type: "comp", uid, dx: w.x - comp.x, dy: w.y - comp.y, moved: false };
+        this.fastRouting = true;
         e.preventDefault();
         return;
       }
@@ -325,6 +345,7 @@
         S.select("rail", id);
         const rail = S.getRail(id);
         this.drag = { type: "rail", id, dy: w.y - rail.y, members: this.railMembers(id) };
+        this.fastRouting = true;
         e.preventDefault();
         return;
       }
@@ -376,8 +397,26 @@
 
     onUp(e) {
       if (S.mode === "wire") IASim.wiring.onPointerUp(e);
-      if (this.drag && (this.drag.type === "comp" || this.drag.type === "rail")) U.emit("project:dirty");
+      const settled = this.drag && (this.drag.type === "comp" || this.drag.type === "rail");
       this.drag = null;
+      if (this.fastRouting) {
+        // the drag is over — re-route the cables properly, around the parts
+        this.fastRouting = false;
+        this.rerouteWires();
+      }
+      if (settled) U.emit("project:dirty");
+    },
+
+    // recompute every cable path in place, without a full re-render
+    rerouteWires() {
+      S.project.wires.forEach((wr) => {
+        const we = this.els.wires.get(wr.id);
+        if (!we) return;
+        const d = routePath(this.terminalAnchor(wr.a.comp, wr.a.term),
+                            this.terminalAnchor(wr.b.comp, wr.b.term));
+        we.path.setAttribute("d", d);
+        we.group.querySelector(".wire-hit").setAttribute("d", d);
+      });
     },
 
     onWheel(e) {
@@ -401,8 +440,8 @@
         if (wr.a.comp === comp.uid || wr.b.comp === comp.uid) {
           const we = this.els.wires.get(wr.id);
           if (!we) return;
-          const a = this.terminalPos(wr.a.comp, wr.a.term);
-          const b = this.terminalPos(wr.b.comp, wr.b.term);
+          const a = this.terminalAnchor(wr.a.comp, wr.a.term);
+          const b = this.terminalAnchor(wr.b.comp, wr.b.term);
           const d = routePath(a, b);
           we.path.setAttribute("d", d);
           we.group.querySelector(".wire-hit").setAttribute("d", d);
@@ -469,15 +508,258 @@
   }
 
   // orthogonal-ish cable routing with a gentle curve
+  /* ---------------- cable routing ----------------
+   * Cables run like real cabinet wiring: a short stub straight out of the
+   * terminal, along a clear channel between the parts, then straight into the
+   * far terminal. Every segment is horizontal, vertical, or a 45° diagonal --
+   * no other angles and no curves. Corners are chamfered at 45° rather than
+   * squared off, and the channel is nudged clear of any component it would
+   * otherwise cross, so cables run between parts instead of behind them.
+   */
+  const STUB = 10;        // straight run out of a terminal before turning
+  const CHAMFER = 12;     // maximum 45° corner cut
+  const CLEAR = 6;        // gap left around a component when routing past it
+  const GRID_STEP = 8;    // obstacle-avoidance grid resolution
+  const GRID_PAD = 140;   // how far outside the two ends the search may wander
+  const GRID_MAX = 40000; // cell ceiling — beyond this fall back to the cheap route
+
+  const sgn = (n) => (n < 0 ? -1 : 1);
+  const pt = (x, y) => ({ x, y });
+  const round = (n) => Math.round(n * 100) / 100;
+
+  // step a point out of its terminal, perpendicular to the edge it sits on
+  function stub(p) {
+    switch (p.side) {
+      case "top": return pt(p.x, p.y - STUB);
+      case "bottom": return pt(p.x, p.y + STUB);
+      case "left": return pt(p.x - STUB, p.y);
+      case "right": return pt(p.x + STUB, p.y);
+    }
+    return pt(p.x, p.y);
+  }
+
+  function obstacles(skip) {
+    const out = [];
+    ((S.project && S.project.components) || []).forEach((c) => {
+      if (skip.indexOf(c.uid) >= 0) return;
+      const def = cat.byId[c.typeId];
+      if (def) out.push({ x0: c.x - CLEAR, y0: c.y - CLEAR, x1: c.x + def.w + CLEAR, y1: c.y + def.h + CLEAR });
+    });
+    return out;
+  }
+
+  /* ---- obstacle-avoiding route (A* on an 8-direction grid) ----
+   * Eight directions means every step is horizontal, vertical or a 45°
+   * diagonal, so the result is 45°-compliant by construction. Turning costs a
+   * little extra, which keeps runs long and straight instead of staircased.
+   * Returns the inner points from sa to sb, or null when there is no way
+   * through (or the search area is too large) so the caller can fall back.
+   */
+  function gridRoute(sa, sb, skip) {
+    const minX = Math.min(sa.x, sb.x) - GRID_PAD, maxX = Math.max(sa.x, sb.x) + GRID_PAD;
+    const minY = Math.min(sa.y, sb.y) - GRID_PAD, maxY = Math.max(sa.y, sb.y) + GRID_PAD;
+    const cols = Math.floor((maxX - minX) / GRID_STEP) + 1;
+    const rows = Math.floor((maxY - minY) / GRID_STEP) + 1;
+    if (cols < 2 || rows < 2 || cols * rows > GRID_MAX) return null;
+
+    const blocked = new Uint8Array(cols * rows);
+    obstacles(skip).forEach((o) => {
+      const x0 = Math.max(0, Math.floor((o.x0 - minX) / GRID_STEP));
+      const x1 = Math.min(cols - 1, Math.ceil((o.x1 - minX) / GRID_STEP));
+      const y0 = Math.max(0, Math.floor((o.y0 - minY) / GRID_STEP));
+      const y1 = Math.min(rows - 1, Math.ceil((o.y1 - minY) / GRID_STEP));
+      for (let gy = y0; gy <= y1; gy++) for (let gx = x0; gx <= x1; gx++) blocked[gy * cols + gx] = 1;
+    });
+
+    const cell = (p) => ({
+      gx: Math.max(0, Math.min(cols - 1, Math.round((p.x - minX) / GRID_STEP))),
+      gy: Math.max(0, Math.min(rows - 1, Math.round((p.y - minY) / GRID_STEP))),
+    });
+    const A = cell(sa), B = cell(sb);
+    const si = A.gy * cols + A.gx, gi = B.gy * cols + B.gx;
+    blocked[si] = 0; blocked[gi] = 0;     // a terminal is always reachable
+    if (si === gi) return [sb];
+
+    const DIRS = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+    const g = new Float32Array(cols * rows).fill(Infinity);
+    const from = new Int32Array(cols * rows).fill(-1);
+    const dirOf = new Int8Array(cols * rows).fill(-1);
+    const closed = new Uint8Array(cols * rows);
+    const h = (i) => {
+      const dx = Math.abs((i % cols) - B.gx), dy = Math.abs(Math.floor(i / cols) - B.gy);
+      return (dx + dy) + (Math.SQRT2 - 2) * Math.min(dx, dy);   // octile distance
+    };
+
+    // binary min-heap keyed on f
+    const heap = [], hf = [];
+    const push = (i, f) => {
+      heap.push(i); hf.push(f);
+      let n = heap.length - 1;
+      while (n > 0) {
+        const par = (n - 1) >> 1;
+        if (hf[par] <= hf[n]) break;
+        [heap[par], heap[n]] = [heap[n], heap[par]]; [hf[par], hf[n]] = [hf[n], hf[par]];
+        n = par;
+      }
+    };
+    const pop = () => {
+      const top = heap[0];
+      const li = heap.pop(), lf = hf.pop();
+      if (heap.length) {
+        heap[0] = li; hf[0] = lf;
+        let n = 0;
+        for (;;) {
+          const l = 2 * n + 1, r = l + 1;
+          let m = n;
+          if (l < heap.length && hf[l] < hf[m]) m = l;
+          if (r < heap.length && hf[r] < hf[m]) m = r;
+          if (m === n) break;
+          [heap[m], heap[n]] = [heap[n], heap[m]]; [hf[m], hf[n]] = [hf[n], hf[m]];
+          n = m;
+        }
+      }
+      return top;
+    };
+
+    g[si] = 0; push(si, h(si));
+    let found = false, guard = 0;
+    while (heap.length && guard++ < GRID_MAX) {
+      const cur = pop();
+      if (closed[cur]) continue;
+      closed[cur] = 1;
+      if (cur === gi) { found = true; break; }
+      const cx = cur % cols, cy = (cur - cx) / cols;
+      for (let d = 0; d < 8; d++) {
+        const nx = cx + DIRS[d][0], ny = cy + DIRS[d][1];
+        if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+        const ni = ny * cols + nx;
+        if (blocked[ni] || closed[ni]) continue;
+        // never cut a diagonal past the corner of an obstacle
+        if (DIRS[d][0] && DIRS[d][1] &&
+            (blocked[cy * cols + nx] || blocked[ny * cols + cx])) continue;
+        const step = DIRS[d][0] && DIRS[d][1] ? Math.SQRT2 : 1;
+        const turn = dirOf[cur] >= 0 && dirOf[cur] !== d ? 0.9 : 0;
+        const ng = g[cur] + step + turn;
+        if (ng < g[ni]) { g[ni] = ng; from[ni] = cur; dirOf[ni] = d; push(ni, ng + h(ni)); }
+      }
+    }
+    if (!found) return null;
+
+    // walk back, then keep only the points where the direction changes
+    const chain = [];
+    for (let i = gi; i !== -1; i = from[i]) chain.push(i);
+    chain.reverse();
+    const pts = chain.map((i) => pt(minX + (i % cols) * GRID_STEP, minY + Math.floor(i / cols) * GRID_STEP));
+    const keep = [];
+    for (let i = 0; i < pts.length; i++) {
+      if (i === 0 || i === pts.length - 1) { keep.push(pts[i]); continue; }
+      const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+      const d1x = sgn(b.x - a.x) * (b.x !== a.x ? 1 : 0), d1y = sgn(b.y - a.y) * (b.y !== a.y ? 1 : 0);
+      const d2x = sgn(c.x - b.x) * (c.x !== b.x ? 1 : 0), d2y = sgn(c.y - b.y) * (c.y !== b.y ? 1 : 0);
+      if (d1x !== d2x || d1y !== d2y) keep.push(b);
+    }
+    // The grid path sits on grid nodes; the terminal stubs generally do not.
+    // Join them with straight/45° hops rather than pulling the grid points onto
+    // the stubs, which would produce arbitrary angles. The offset is under half
+    // a grid step, well inside the clearance left around every component.
+    const inner = [];
+    inner.push(...diagonalTo(sa, keep[0]));
+    for (let i = 1; i < keep.length; i++) inner.push(keep[i]);
+    inner.push(...diagonalTo(keep[keep.length - 1], sb));
+    return inner;
+  }
+
+  // ---- cheap fallback: out, along a channel, back in ----
+  function crosses(o, lo, hi, fixed, horizontal) {
+    return horizontal
+      ? fixed > o.y0 && fixed < o.y1 && Math.max(lo, hi) > o.x0 && Math.min(lo, hi) < o.x1
+      : fixed > o.x0 && fixed < o.x1 && Math.max(lo, hi) > o.y0 && Math.min(lo, hi) < o.y1;
+  }
+
+  function clearChannel(fixed, lo, hi, horizontal, skip) {
+    const obs = obstacles(skip);
+    for (let i = 0; i < 8; i++) {
+      let hit = null;
+      for (let j = 0; j < obs.length; j++) {
+        if (crosses(obs[j], lo, hi, fixed, horizontal)) { hit = obs[j]; break; }
+      }
+      if (!hit) return fixed;
+      const before = horizontal ? hit.y0 : hit.x0;
+      const after = horizontal ? hit.y1 : hit.x1;
+      fixed = Math.abs(fixed - before) <= Math.abs(fixed - after) ? before : after;
+    }
+    return fixed;
+  }
+
+  // A straight run then an exact 45° leg. No tolerances: an "almost diagonal"
+  // segment is not 45°, so the diagonal leg always moves equally in x and y.
+  function diagonalTo(from, to) {
+    const dx = to.x - from.x, dy = to.y - from.y;
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    if (adx === 0 || ady === 0 || adx === ady) return [to];   // already compliant
+    return adx > ady
+      ? [pt(to.x - sgn(dx) * ady, from.y), to]
+      : [pt(from.x, to.y - sgn(dy) * adx), to];
+  }
+
+  function channelRoute(a, b, sa, sb, skip) {
+    const inner = [];
+    const aVert = a.side === "top" || a.side === "bottom";
+    const bVert = b.side === "top" || b.side === "bottom";
+    if (aVert && bVert && Math.abs(sb.x - sa.x) > 1) {
+      const y = clearChannel((sa.y + sb.y) / 2, sa.x, sb.x, true, skip);
+      inner.push(pt(sa.x, y), pt(sb.x, y));
+    } else if (!aVert && !bVert && Math.abs(sb.y - sa.y) > 1) {
+      const x = clearChannel((sa.x + sb.x) / 2, sa.y, sb.y, false, skip);
+      inner.push(pt(x, sa.y), pt(x, sb.y));
+    } else {
+      const via = aVert ? pt(sa.x, sb.y) : pt(sb.x, sa.y);
+      if (Math.abs(via.x - sa.x) > 1 || Math.abs(via.y - sa.y) > 1) inner.push(...diagonalTo(sa, via));
+    }
+    inner.push(sb);
+    return inner;
+  }
+
+  // replace each square corner with a 45° cut, kept small enough to stay inside
+  // the clearance already left around every component
+  function chamfer(pts) {
+    if (pts.length < 3) return pts;
+    const out = [pts[0]];
+    for (let i = 1; i < pts.length - 1; i++) {
+      const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+      const inH = b.y === a.y, inV = b.x === a.x;      // exactly axis-aligned?
+      const outH = c.y === b.y, outV = c.x === b.x;
+      const square = (inH && outV) || (inV && outH);   // a true 90° corner
+      const inLen = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+      const outLen = Math.abs(c.x - b.x) + Math.abs(c.y - b.y);
+      const k = Math.min(CHAMFER, CLEAR - 1, inLen / 2, outLen / 2);
+      if (!square || k <= 0.5) { out.push(b); continue; }
+      out.push(pt(inH ? b.x - sgn(b.x - a.x) * k : b.x, inV ? b.y - sgn(b.y - a.y) * k : b.y));
+      out.push(pt(outH ? b.x + sgn(c.x - b.x) * k : b.x, outV ? b.y + sgn(c.y - b.y) * k : b.y));
+    }
+    out.push(pts[pts.length - 1]);
+    return out;
+  }
+
+  /* Route one cable. Segments are only ever horizontal, vertical or 45°.
+   * While a part is being dragged the cheap channel route is used so the canvas
+   * stays responsive; the obstacle-avoiding route is computed once the drag ends. */
   function routePath(a, b) {
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const midX = a.x + dx / 2;
-    if (Math.abs(dy) < 8) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
-    // route out, across, in — like real wire ducting
-    const r = 8;
-    const dir = dy > 0 ? 1 : -1;
-    return `M ${a.x} ${a.y}
-            C ${midX} ${a.y}, ${midX} ${b.y}, ${b.x} ${b.y}`.replace(/\s+/g, " ");
+    const pa = pt(a.x, a.y), pb = pt(b.x, b.y);
+    const sa = stub(a), sb = stub(b);
+    const skip = [a.comp, b.comp].filter(Boolean);
+
+    let inner = null;
+    if (!D.fastRouting) inner = gridRoute(sa, sb, skip);
+    if (!inner) inner = channelRoute(a, b, sa, sb, skip);
+
+    let pts = [pa, sa].concat(inner, [pb]);
+    pts = pts.filter((p, i) => {
+      const q = pts[i - 1];
+      return !q || p.x !== q.x || p.y !== q.y;
+    });
+    pts = chamfer(pts);
+    return "M " + pts.map((p) => `${round(p.x)} ${round(p.y)}`).join(" L ");
   }
 
   IASim.designer = D;

@@ -73,8 +73,8 @@
     },
     movePreviewTo(pt) {
       if (!this.pending || !this.preview) return;
-      const a = D.terminalPos(this.pending.comp, this.pending.term);
-      this.preview.setAttribute("d", `M ${a.x} ${a.y} L ${pt.x} ${pt.y}`);
+      const a = D.terminalAnchor(this.pending.comp, this.pending.term);
+      this.preview.setAttribute("d", D.previewPath(a, pt));
     },
     removePreview() {
       if (this.preview && this.preview.parentNode) this.preview.parentNode.removeChild(this.preview);

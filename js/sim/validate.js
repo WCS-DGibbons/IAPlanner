@@ -28,7 +28,7 @@
     return bridges;
   }
 
-  const DC_SIGNAL = ["source24", "out", "in", "ain", "sigout", "aout", "pwr", "gnd"];
+  const DC_SIGNAL = ["source24", "out", "in", "ain", "aio", "sigout", "aout", "pwr", "gnd", "bus"];
   const name = (uid) => { const c = S.getComponent(uid); return c ? cat.byId[c.typeId].name : "?"; };
   const hasWire = (project, uid, term) =>
     project.wires.some((w) => (w.a.comp === uid && w.a.term === term) || (w.b.comp === uid && w.b.term === term));
@@ -90,7 +90,7 @@
         else if (def.mainsNeutral && !netHasKindAt(def.mainsNeutral, "mainsN"))
           issues.push(issue("warn", "psu-neutral", name(c.uid) + ": neutral N is not connected to mains.", [c.uid]));
       }
-      if (def.behavior === "sensor" || def.behavior === "asensor") {
+      if (def.behavior === "sensor" || def.behavior === "asensor" || def.behavior === "mbsensor") {
         const pwr = def.terminals.find((t) => t.kind === "pwr");
         if (pwr && !netHasKindAt(pwr.id, "source24"))
           issues.push(issue("warn", "sensor-unpowered", name(c.uid) + ": + supply not connected to 24V — sensor will not read.", [c.uid]));
@@ -105,6 +105,58 @@
         if (pw && !netHasKindAt(pw.id, "source24"))
           issues.push(issue("info", "plc-unpowered", name(c.uid) + ": " + (pw.label || pw.id) + " has no 24V supply (inputs/outputs still simulate, but wire it for realism).", [c.uid]));
       }
+    });
+
+    // ---- RS-485 / Modbus bus checks ----
+    const masters = [];      // controller RS-485 ports
+    const terms = [];        // 120Ω end-of-line resistors
+    project.components.forEach((c) => {
+      const def = cat.byId[c.typeId];
+      if (!def) return;
+      if (def.busPort)
+        masters.push({ uid: c.uid, a: net.root(c.uid, def.busPort.a), b: net.root(c.uid, def.busPort.b) });
+      if (def.behavior === "mbterm")
+        terms.push({ uid: c.uid, a: net.root(c.uid, "A"), b: net.root(c.uid, "B") });
+    });
+
+    const onBus = new Map();  // master index -> [{uid, addr}]
+    project.components.forEach((c) => {
+      const def = cat.byId[c.typeId];
+      if (!def || def.behavior !== "mbsensor") return;
+      const a = net.root(c.uid, "A"), b = net.root(c.uid, "B");
+      const mi = masters.findIndex((m) => m.a === a && m.b === b);
+      if (mi >= 0) {
+        if (!onBus.has(mi)) onBus.set(mi, []);
+        onBus.get(mi).push({ uid: c.uid, addr: (c.state && c.state.addr) || 1 });
+        return;
+      }
+      // A and B crossed over: the device is wired but can never answer.
+      if (masters.some((m) => m.a === b && m.b === a)) {
+        issues.push(issue("error", "bus-swapped", name(c.uid) + ": RS485 A and B are swapped — connect A to A and B to B, or the device will never reply.", [c.uid]));
+        return;
+      }
+      if (hasWire(project, c.uid, "A") || hasWire(project, c.uid, "B"))
+        issues.push(issue("warn", "bus-no-master", name(c.uid) + ": its RS485 bus does not reach a controller's A/B port — nothing is polling it.", [c.uid]));
+      else
+        issues.push(issue("warn", "bus-unwired", name(c.uid) + ": A and B are not wired — connect it to the RS485 bus.", [c.uid]));
+    });
+
+    // duplicate slave addresses, device count, and end-of-line termination
+    onBus.forEach((devs, mi) => {
+      const m = masters[mi];
+      const byAddr = new Map();
+      devs.forEach((d) => { if (!byAddr.has(d.addr)) byAddr.set(d.addr, []); byAddr.get(d.addr).push(d.uid); });
+      byAddr.forEach((uids, addr) => {
+        if (uids.length > 1)
+          issues.push(issue("error", "bus-dup-addr", "Slave address " + addr + " is used by " + uids.length + " devices on the same bus — every device needs its own address.", uids.concat([m.uid])));
+      });
+      if (devs.length > 32)
+        issues.push(issue("warn", "bus-too-many", "RS485 bus has " + devs.length + " devices — the standard allows 32 without a repeater.", [m.uid]));
+      const terminated = terms.filter((t) => t.a === m.a && t.b === m.b).length;
+      if (devs.length && terminated === 0)
+        issues.push(issue("warn", "bus-unterminated", "RS485 bus has no 120Ω terminator — fit one at each far end of the run.", [m.uid]));
+      else if (terminated > 2)
+        issues.push(issue("warn", "bus-over-terminated", "RS485 bus has " + terminated + " terminators — fit exactly two, one at each end.", [m.uid]));
     });
 
     // de-duplicate identical messages

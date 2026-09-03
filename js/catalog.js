@@ -9,6 +9,10 @@
  *   sigout   : sensor signal output (drives 24V when active AND powered)
  *   pwr      : sensor/device + supply pin (needs 24V to function)
  *   pass     : passive node (switches, loads, terminal blocks)
+ *   aio      : configurable input read BOTH ways - t.tag gets the digital
+ *              state, t.atag gets the analog value (Arduino Opta I1-I8)
+ *   bus      : RS-485 data line (A/B). Carries no power; devices on the same
+ *              A and B nets as a controller's busPort answer its Modbus polls.
  *
  * behavior drives the simulation in sim/engine.js.
  *
@@ -26,8 +30,8 @@
   const H = 104;          // tall device height
   const M = 18;           // one DIN module width
 
-  function T(id, label, kind, side, pos, tag) {
-    return { id, label, kind, side, pos, tag: tag || null };
+  function T(id, label, kind, side, pos, tag, atag) {
+    return { id, label, kind, side, pos, tag: tag || null, atag: atag || null };
   }
 
   const CATALOG = [
@@ -129,6 +133,51 @@
       ],
       indicator: { color: "#ebcb8b", source: "L+" },
       isController: true,
+    },
+
+    {
+      id: "opta", name: "Arduino Opta RS485", category: "Controller",
+      desc: "8 configurable I/O · 4 relays · RS485 Modbus",
+      w: M * 13, h: H, color: "#008184", railMount: true, behavior: "plc", isController: true,
+      // The RS-485 port this controller polls as a Modbus RTU master.
+      busPort: { a: "A", b: "B" },
+      terminals: [
+        // supply: 12-24V DC
+        T("Vp", "+", "pwr", "top", 0.03),
+        T("Vm", "−", "gnd", "top", 0.09),
+        // I1-I8 are configurable: 12-24V digital OR 0-10V analog. Each publishes
+        // both a digital tag (I1..I8) and an analog tag (AI1..AI8) - same pin,
+        // read whichever way your program needs.
+        T("I1", "I1", "aio", "top", 0.20, "I1", "AI1"),
+        T("I2", "I2", "aio", "top", 0.29, "I2", "AI2"),
+        T("I3", "I3", "aio", "top", 0.38, "I3", "AI3"),
+        T("I4", "I4", "aio", "top", 0.47, "I4", "AI4"),
+        T("I5", "I5", "aio", "top", 0.56, "I5", "AI5"),
+        T("I6", "I6", "aio", "top", 0.65, "I6", "AI6"),
+        T("I7", "I7", "aio", "top", 0.74, "I7", "AI7"),
+        T("I8", "I8", "aio", "top", 0.83, "I8", "AI8"),
+        // 4 volt-free relay contacts (SPST-NO, 10A 250VAC). Unlike the M-Duino's
+        // sourcing outputs these carry no voltage of their own - they just close.
+        T("O1c", "1C", "pass", "bottom", 0.05),
+        T("O1no", "1NO", "pass", "bottom", 0.12),
+        T("O2c", "2C", "pass", "bottom", 0.22),
+        T("O2no", "2NO", "pass", "bottom", 0.29),
+        T("O3c", "3C", "pass", "bottom", 0.39),
+        T("O3no", "3NO", "pass", "bottom", 0.46),
+        T("O4c", "4C", "pass", "bottom", 0.56),
+        T("O4no", "4NO", "pass", "bottom", 0.63),
+        // RS-485 half-duplex bus
+        T("A", "A", "bus", "bottom", 0.80),
+        T("B", "B", "bus", "bottom", 0.88),
+      ],
+      // tag true -> that relay's contact closes
+      relayContacts: [
+        { tag: "O1", a: "O1c", b: "O1no" },
+        { tag: "O2", a: "O2c", b: "O2no" },
+        { tag: "O3", a: "O3c", b: "O3no" },
+        { tag: "O4", a: "O4c", b: "O4no" },
+      ],
+      indicator: { color: "#3fb950", source: "Vp" },
     },
 
     // ---------------- RELAYS ----------------
@@ -520,6 +569,102 @@
       indicator: { color: "#88c0d0", source: "A" }, actuator: "vent",
     },
   ];
+
+  // ---------------- RS-485 / MODBUS RTU DEVICES ----------------
+  // On a bus device the reading does not travel on its own wire: every device
+  // shares one A/B pair back to the controller's RS-485 port, and is identified
+  // by its slave address. Readings surface as tags MB<addr>.R<n> (and MB<addr>
+  // for a single-reading device).
+
+  // Bus terminals are identical on every device, so build them once.
+  function busTerminals() {
+    return [
+      T("P", "+", "pwr", "left", 0.2),
+      T("N", "−", "gnd", "left", 0.8),
+      T("A", "A", "bus", "right", 0.3),
+      T("B", "B", "bus", "right", 0.7),
+    ];
+  }
+
+  function mbDevice(o) {
+    return {
+      id: o.id, name: o.name, category: o.category || "Field · RS485", desc: o.desc,
+      w: M * (o.registers.length > 1 ? 5.6 : 5), h: 84, color: o.color,
+      railMount: false, behavior: "mbsensor",
+      terminals: busTerminals(),
+      registers: o.registers,
+      defaultState: { addr: 1, values: o.registers.map((r) => r.value) },
+      indicator: { color: "#ebcb8b", source: "P" },
+    };
+  }
+
+  // --- one bus twin per analog sensor, so you can swap like for like ---
+  CATALOG.filter((d) => d.behavior === "asensor").forEach((d) => {
+    const p = d.props || {};
+    CATALOG.push(mbDevice({
+      id: "mb_" + d.id,
+      name: d.name.replace(/\s*\(.*\)/, "") + " (RS485)",
+      desc: (p.unit || "") + " over Modbus RTU · needs 24V",
+      color: d.color,
+      registers: [{
+        label: d.name.replace(/\s+(Sensor|Transmitter|Meter|Transducer)$/, ""),
+        unit: p.unit, shortUnit: p.shortUnit, min: p.min, max: p.max,
+        decimals: p.decimals, step: p.step, value: (d.defaultState || {}).value,
+      }],
+    }));
+  });
+
+  // --- multi-parameter probes: several readings from one address, as sold ---
+  CATALOG.push(mbDevice({
+    id: "mb_soilprobe", name: "Soil Probe 4-in-1 (RS485)",
+    desc: "Moisture · temp · EC · pH over Modbus", color: "#a3be8c",
+    registers: [
+      { label: "Moisture", unit: "%VWC", min: 0, max: 60, decimals: 1, value: 28 },
+      { label: "Temperature", unit: "°C", min: 0, max: 45, decimals: 1, value: 18.5 },
+      { label: "EC", unit: "mS/cm", min: 0, max: 5, decimals: 2, value: 1.8 },
+      { label: "pH", unit: "pH", min: 0, max: 14, decimals: 2, value: 6.2 },
+    ],
+  }));
+  CATALOG.push(mbDevice({
+    id: "mb_climate", name: "Climate Sensor 4-in-1 (RS485)",
+    desc: "Temp · humidity · CO₂ · light over Modbus", color: "#5e81ac",
+    registers: [
+      { label: "Temperature", unit: "°C", min: -10, max: 50, decimals: 1, value: 24 },
+      { label: "Humidity", unit: "%RH", min: 0, max: 100, decimals: 0, value: 65 },
+      { label: "CO₂", unit: "ppm", min: 300, max: 2000, decimals: 0, value: 420 },
+      { label: "Light", unit: "µmol/m²/s", shortUnit: "µmol", min: 0, max: 2000, decimals: 0, value: 350 },
+    ],
+  }));
+  CATALOG.push(mbDevice({
+    id: "mb_weather", name: "Weather Station (RS485)",
+    desc: "Wind · direction · rain · temp over Modbus", color: "#81a1c1",
+    registers: [
+      { label: "Wind speed", unit: "m/s", min: 0, max: 40, decimals: 1, value: 3.5 },
+      { label: "Wind direction", unit: "°", min: 0, max: 359, decimals: 0, value: 180 },
+      { label: "Rainfall", unit: "mm", min: 0, max: 100, decimals: 1, value: 0 },
+      { label: "Temperature", unit: "°C", min: -10, max: 50, decimals: 1, value: 22 },
+    ],
+  }));
+  CATALOG.push(mbDevice({
+    id: "mb_energy", name: "Energy Meter (RS485)",
+    desc: "Volts · amps · kW · kWh over Modbus", color: "#ebcb8b",
+    registers: [
+      { label: "Voltage", unit: "V", min: 0, max: 500, decimals: 1, value: 240 },
+      { label: "Current", unit: "A", min: 0, max: 100, decimals: 1, value: 6 },
+      { label: "Power", unit: "kW", min: 0, max: 50, decimals: 2, value: 1.44 },
+      { label: "Energy", unit: "kWh", min: 0, max: 99999, decimals: 0, value: 1250 },
+    ],
+  }));
+
+  // End-of-line terminator. A real RS-485 bus needs 120Ω across A/B at each
+  // end; the Opta has none built in, so it is a part you place.
+  CATALOG.push({
+    id: "rs485term", name: "RS485 Terminator 120Ω", category: "Field · RS485",
+    desc: "End-of-line resistor across A/B",
+    w: M * 2.6, h: 56, color: "#4c566a", railMount: false, behavior: "mbterm",
+    terminals: [ T("A", "A", "bus", "left", 0.3), T("B", "B", "bus", "left", 0.7) ],
+    indicator: { color: "#4c566a", source: "A" },
+  });
 
   const byId = {};
   CATALOG.forEach((c) => (byId[c.id] = c));

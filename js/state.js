@@ -112,6 +112,15 @@
         props: U.deepCopy(def.props || {}),
         state: U.deepCopy(def.defaultState || {}),
       };
+      // Every device on an RS-485 bus needs its own slave address, so hand out
+      // the lowest one not already taken instead of dropping them all on 1.
+      if (def.behavior === "mbsensor") {
+        const used = new Set(this.project.components
+          .filter((c) => { const d = cat.byId[c.typeId]; return d && d.behavior === "mbsensor"; })
+          .map((c) => c.state && c.state.addr));
+        let a = 1; while (used.has(a) && a < 247) a++;
+        comp.state.addr = a;
+      }
       this.project.components.push(comp);
       U.emit("project:changed");
       return comp;
@@ -211,7 +220,8 @@
     if (!term) return "#c0c5ce";
     if (term.kind === "source24") return "#e06c75"; // 24V+ red
     if (term.kind === "gnd") return "#5c6370";      // 0V blue/grey
-    if (term.kind === "sigout" || term.kind === "in") return "#61afef";
+    if (term.kind === "sigout" || term.kind === "in" || term.kind === "aio") return "#61afef";
+    if (term.kind === "bus") return "#c678dd";      // RS-485 data pair — purple
     return "#c0c5ce";
   }
 

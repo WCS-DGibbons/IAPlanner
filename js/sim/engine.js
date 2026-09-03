@@ -191,6 +191,13 @@
           case "selector":
             if (c.state.closed) def.bridge.forEach((p) => add(c.uid, p[0], p[1]));
             break;
+          case "plc":
+            // Opta-style relay outputs: the tag closes a dry contact rather
+            // than sourcing 24V, so the contact can switch any voltage.
+            (def.relayContacts || []).forEach((rc) => {
+              if (U.truthy(this.tags[rc.tag])) add(c.uid, rc.a, rc.b);
+            });
+            break;
           case "relay": {
             const coilOn = isHot(c.uid, def.coil[0]); // A1 hot vs A2(gnd)
             if (def.contactNO && coilOn) add(c.uid, def.contactNO[0], def.contactNO[1]);
@@ -213,6 +220,52 @@
             const r = res.net.root(c.uid, t.id);
             this.tags[t.tag] = res.analog && res.analog.has(r) ? res.analog.get(r) : 0;
           }
+          else if (t.kind === "aio") {
+            // one physical pin, readable either way (Arduino Opta I1-I8)
+            const r = res.net.root(c.uid, t.id);
+            if (t.tag) this.tags[t.tag] = res.hot.has(r);
+            if (t.atag) this.tags[t.atag] = res.analog && res.analog.has(r) ? res.analog.get(r) : 0;
+          }
+        });
+      });
+      this.readModbus(project, res);
+    },
+
+    /* RS-485 / Modbus RTU poll.
+     * Every device shares one A/B pair with the controller's bus port, so there
+     * is no per-device wire to read a voltage from. A device answers only when
+     * it is powered AND its A/B sit on the same two nets as the master's A/B --
+     * swap the pair over and it stays silent, exactly like the real thing.
+     * Readings land in tags MB<addr>.R<n>, plus MB<addr> for single-reading
+     * devices. Tags are cleared first so a device that drops off the bus stops
+     * reporting instead of leaving a stale value behind. */
+    readModbus(project, res) {
+      Object.keys(this.tags).forEach((k) => {
+        if (/^MB\d+(\.R\d+)?$/.test(k)) delete this.tags[k];
+      });
+      const root = (c, t) => res.net.root(c, t);
+
+      const masters = [];
+      project.components.forEach((c) => {
+        const def = cat.byId[c.typeId];
+        if (def && def.busPort)
+          masters.push({ a: root(c.uid, def.busPort.a), b: root(c.uid, def.busPort.b) });
+      });
+      if (!masters.length) return;
+
+      project.components.forEach((c) => {
+        const def = cat.byId[c.typeId];
+        if (!def || def.behavior !== "mbsensor") return;
+        const pwr = def.terminals.find((t) => t.kind === "pwr");
+        if (pwr && !res.hot.has(root(c.uid, pwr.id))) return;      // unpowered: silent
+        const a = root(c.uid, "A"), b = root(c.uid, "B");
+        if (!masters.some((m) => m.a === a && m.b === b)) return;  // not on a polled bus
+        const addr = (c.state && c.state.addr) || 1;
+        const vals = (c.state && c.state.values) || [];
+        def.registers.forEach((reg, i) => {
+          const v = typeof vals[i] === "number" ? vals[i] : reg.value;
+          this.tags["MB" + addr + ".R" + i] = v;
+          if (def.registers.length === 1) this.tags["MB" + addr] = v;
         });
       });
     },

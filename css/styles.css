@@ -120,6 +120,7 @@ aside { background: var(--panel); display: flex; flex-direction: column; min-hei
 .comp .comp-tag { fill: #fff; font: 700 10px var(--ui); pointer-events: none; }
 
 .comp .sensor-readout { fill: #fff; font: 700 13px var(--mono); pointer-events: none; }
+.comp .bus-addr { fill: #9aa4b2; font: 700 9px var(--mono); pointer-events: none; }
 .comp .act-rod { transition: transform .5s ease; }
 .comp.on .act-rod { transform: translateX(16px); }
 .comp.on .act-cyl, .comp.on .vent-frame { stroke: var(--on); }

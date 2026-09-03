@@ -234,6 +234,67 @@
           "Drag to simulate the reading. Wire the AO terminal to an M-Duino analog input (AI0–AI3)." }));
         return wrap;
       }
+      if (b === "mbsensor") {
+        const regs = def.registers || [];
+        if (!comp.state.values) comp.state.values = regs.map((r) => r.value);
+        if (!comp.state.addr) comp.state.addr = 1;
+
+        // --- Modbus slave address ---
+        const tagNote = U.el("div", { class: "empty-note" });
+        const showTags = () => {
+          const a = comp.state.addr;
+          tagNote.textContent = regs.length === 1
+            ? "Reads into tag  MB" + a + "  (also MB" + a + ".R0)"
+            : "Reads into tags  " + regs.map((r, i) => "MB" + a + ".R" + i).join(", ");
+        };
+        const addr = U.el("input", { type: "number", min: 1, max: 247, step: 1, value: comp.state.addr });
+        addr.style.width = "100%";
+        addr.addEventListener("input", () => {
+          const v = Math.max(1, Math.min(247, parseInt(addr.value, 10) || 1));
+          comp.state.addr = v; showTags();
+          IASim.designer.setReadout(comp.uid);
+          this.refreshAfterInput();
+        });
+        addr.addEventListener("change", () => U.emit("project:dirty"));
+        wrap.appendChild(U.el("div", { class: "label", text: "Modbus slave address (1–247)" }));
+        wrap.appendChild(addr);
+
+        // --- one slider per holding register ---
+        regs.forEach((r, i) => {
+          const val = U.el("span");
+          const fmt = () => (comp.state.values[i] || 0).toFixed(r.decimals || 0) + " " + (r.unit || "");
+          wrap.appendChild(U.el("div", { class: "label" }, [
+            (r.label || "Register") + (regs.length > 1 ? "  (R" + i + ")" : ""), val,
+          ]));
+          val.textContent = fmt();
+          const step = r.step || Math.pow(10, -(r.decimals || 0));
+          const slider = U.el("input", { type: "range", min: r.min, max: r.max, step: step,
+            value: comp.state.values[i] });
+          slider.style.width = "100%";
+          slider.addEventListener("input", () => {
+            comp.state.values[i] = parseFloat(slider.value);
+            val.textContent = fmt();
+            if (i === 0) IASim.designer.setReadout(comp.uid);
+            this.refreshAfterInput();
+          });
+          slider.addEventListener("change", () => U.emit("project:dirty"));
+          wrap.appendChild(slider);
+        });
+
+        showTags();
+        wrap.appendChild(tagNote);
+        wrap.appendChild(U.el("div", { class: "empty-note", text:
+          "Wire + and − to 24V, then A and B to the Arduino Opta's A and B. Every " +
+          "bus device shares the same pair — daisy-chain them, do not run one pair each." }));
+        return wrap;
+      }
+      if (b === "mbterm") {
+        wrap.appendChild(U.el("div", { class: "label", text: "RS485 Terminator 120Ω" }));
+        wrap.appendChild(U.el("div", { class: "empty-note", text:
+          "Passive end-of-line resistor. Fit one across A/B at each far end of the " +
+          "bus — two in total, never on a device in the middle." }));
+        return wrap;
+      }
       if (b === "actuator") {
         const open = !!(eng.last.on && eng.last.on.get(comp.uid));
         wrap.appendChild(U.el("div", { class: "label" }, [

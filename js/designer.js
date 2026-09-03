@@ -151,13 +151,22 @@
       }
 
       // analog sensor live readout
-      if (def.behavior === "asensor") {
+      if (def.behavior === "asensor" || def.behavior === "mbsensor") {
         const txt = U.svg("text", {
           class: "sensor-readout", x: def.w / 2, y: def.h / 2 + 6, "text-anchor": "middle",
         });
         fitReadout(txt, def, formatSensor(def, comp));
         g.appendChild(txt);
-        this.els.readouts.set(comp.uid, { el: txt, def });
+        let addrEl = null;
+        if (def.behavior === "mbsensor") {
+          // slave address sits on its own line so it never shrinks the reading
+          addrEl = U.svg("text", {
+            class: "bus-addr", x: def.w / 2, y: def.h / 2 - 8, "text-anchor": "middle",
+            text: formatAddr(comp),
+          });
+          g.appendChild(addrEl);
+        }
+        this.els.readouts.set(comp.uid, { el: txt, def, addrEl });
       }
 
       // actuator graphics (piston rod / vent flap) — animate via the .on class
@@ -216,7 +225,7 @@
       const d = routePath(a, b);
       const g = U.svg("g", { class: "wire-group", "data-wire": w.id });
       g.appendChild(U.svg("path", { class: "wire-hit", d }));
-      const path = U.svg("path", { class: "wire", d, stroke: w.color });
+      const path = U.svg("path", { class: "wire", d, stroke: w.color || "#c0c5ce" });
       g.appendChild(path);
       this.layers.wires.appendChild(g);
       this.els.wires.set(w.id, { path, group: g });
@@ -266,7 +275,9 @@
     setReadout(uid) {
       const r = this.els.readouts.get(uid);
       const comp = S.getComponent(uid);
-      if (r && comp) fitReadout(r.el, r.def, formatSensor(r.def, comp));
+      if (!r || !comp) return;
+      fitReadout(r.el, r.def, formatSensor(r.def, comp));
+      if (r.addrEl) r.addrEl.textContent = formatAddr(comp);
     },
 
     // ---------------- interaction ----------------
@@ -431,11 +442,21 @@
   }
 
   function formatSensor(def, comp) {
+    if (def.behavior === "mbsensor") {
+      const r = (def.registers && def.registers[0]) || {};
+      const vals = (comp.state && comp.state.values) || [];
+      const v = typeof vals[0] === "number" ? vals[0] : (r.value || 0);
+      return v.toFixed(r.decimals || 0) + " " + (r.shortUnit || r.unit || "");
+    }
     const v = comp.state && typeof comp.state.value === "number" ? comp.state.value : 0;
     const d = (def.props && def.props.decimals) || 0;
     // shortUnit keeps wide units (e.g. µmol/m²/s) readable on the small canvas box
     const u = (def.props && (def.props.shortUnit || def.props.unit)) || "";
     return v.toFixed(d) + " " + u;
+  }
+
+  function formatAddr(comp) {
+    return "#" + ((comp.state && comp.state.addr) || 1);
   }
 
   // Write a sensor reading into its box, shrinking the text if it would overflow.

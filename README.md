@@ -123,6 +123,113 @@ machine instead of hiding the fault. Wire it into a permissive, not a trip —
 > (`I0.0`–`I0.2`), so that is how many sensors one PLC can read at a time. Delete a
 > sensor you are not using to free its input, or add a second controller.
 
+### RS-485 / Modbus sensors — many sensors, two wires
+
+Every sensor above needs its own wire back to its own input, and the M-Duino only
+has 4 analog inputs. **RS-485** removes that limit. It is a two-wire *bus*: a single
+pair of wires — called **A** and **B** — runs past every device, and up to 32 devices
+share it. Each device has its own **slave address** (a number from 1 to 247) so the
+controller knows which one it is talking to, and the controller asks them for
+readings one at a time using a protocol called **Modbus RTU**.
+
+Fewer wires, far more sensors. The trade-off is that you have to keep the addresses
+straight, so the Checks tab watches that for you.
+
+#### The controller: Arduino Opta RS485
+
+Drag **Arduino Opta RS485** from the `Controller` group. It is a real micro-PLC
+(Arduino/Finder), and it is the part that polls the bus.
+
+| | Terminals | Notes |
+|---|---|---|
+| Supply | `+` `−` | 12–24V DC |
+| Inputs | `I1`–`I8` | **Configurable**: 12–24V digital *or* 0–10V analog |
+| Relay outputs | `1C`/`1NO` … `4C`/`4NO` | 4 × SPST normally-open, 10A 250VAC |
+| RS-485 bus | `A` `B` | Half-duplex Modbus RTU master |
+
+Two things behave differently from the M-Duino, and both match the real hardware:
+
+- **Each input can be read either way.** Input `I1` publishes *two* tags: `I1` is
+  true/false for a 24V signal, and `AI1` is the 0–10V reading as a number. Same
+  physical terminal — use whichever your program needs. So `I1`…`I8` and `AI1`…`AI8`.
+- **The relay outputs are volt-free contacts.** The M-Duino's outputs *supply* 24V
+  when switched on. The Opta's outputs are just a pair of contacts that **close** —
+  they carry no voltage of their own, which is exactly why they can switch 240V.
+  So feed `1C` from whatever you want to switch and take `1NO` to the load. Setting
+  tag `O1` true closes relay 1; the tags are `O1`–`O4`.
+
+#### Wiring the bus
+
+1. Power each bus device: `+` to 24V, `−` to 0V — same as any other sensor.
+2. Wire the Opta's `A` to the first device's `A`, and `B` to its `B`.
+3. **Daisy-chain** the rest: device 1's `A` to device 2's `A`, and so on down the
+   line. Do **not** run a separate pair to each device — the whole point is that
+   they share one pair.
+4. Give each device a different **slave address** in Properties. IASim assigns the
+   next free one automatically when you drop a device on the canvas, so you only
+   change it if you want to.
+5. Fit an **RS485 Terminator 120Ω** across `A`/`B` at each far end of the run. Real
+   RS-485 needs this to stop signal reflections, and the Opta has none built in.
+
+Bus cables are drawn **purple** so you can pick the data pair out from the power wiring.
+
+#### Reading the values in your program
+
+A device's readings arrive as tags named after its **address** and its **register**
+number (a register is just a numbered slot in the device's memory):
+
+| Tag | Means |
+|---|---|
+| `MB1` | The reading from the single-reading device at address 1 |
+| `MB1.R0` | The same thing — register 0 of address 1 |
+| `MB2.R0` | Register 0 of the device at address 2 |
+| `MB2.R3` | Register 3 of the device at address 2 |
+
+A single-reading device (say the CO₂ sensor) publishes both `MB1` and `MB1.R0` — use
+whichever reads better. A multi-reading probe publishes one tag per register, and the
+Properties panel lists the exact tag names for the device you have selected, so you
+never have to guess.
+
+```
+(* CO2 sensor at address 1 -> ventilate *)
+O1 := MB1 > 800.0;
+
+(* 4-in-1 soil probe at address 2: R0 moisture, R1 temp, R2 EC, R3 pH *)
+O2 := MB2.R0 < 20.0;      (* dry - start irrigation *)
+O3 := MB2.R3 < 5.8;       (* acidic - dose pH up   *)
+```
+
+If a device loses power or comes off the bus, its tags **disappear** rather than
+freezing at their last value — the same as a real Modbus master getting no reply.
+
+#### The devices
+
+Every analog sensor in the tables above has an RS-485 twin, named the same with
+`(RS485)` on the end — CO₂, PAR, soil moisture, soil temperature, pH, EC, wind,
+temperature, humidity, leaf moisture, pressure, flow, tank level, current, load cell
+and the generic 0–10V transmitter. Same reading, delivered over the bus instead of
+its own wire. There are also four multi-parameter units, which is how these are
+usually sold — one address, several readings:
+
+| Device | Registers |
+|---|---|
+| Soil Probe 4-in-1 (RS485) | `R0` moisture %VWC · `R1` temp °C · `R2` EC mS/cm · `R3` pH |
+| Climate Sensor 4-in-1 (RS485) | `R0` temp °C · `R1` humidity %RH · `R2` CO₂ ppm · `R3` light µmol/m²/s |
+| Weather Station (RS485) | `R0` wind m/s · `R1` direction ° · `R2` rainfall mm · `R3` temp °C |
+| Energy Meter (RS485) | `R0` volts · `R1` amps · `R2` kW · `R3` kWh |
+
+#### Bus mistakes the Checks tab catches
+
+| Check | Meaning |
+|---|---|
+| ⛔ **A and B swapped** | The pair is crossed over, so the device can never reply. |
+| ⛔ **Duplicate slave address** | Two devices answer to the same address — the readings will be garbage. |
+| ⚠️ **Bus does not reach a controller** | Wired to other devices, but nothing is polling it. |
+| ⚠️ **A and B not wired** | The device is placed but not on the bus at all. |
+| ⚠️ **No 120Ω terminator** | The run has no end-of-line resistor. |
+| ⚠️ **More than 32 devices** | Beyond what the RS-485 standard allows without a repeater. |
+| ⚠️ **Supply not connected to 24V** | The device has no power, so it stays silent. |
+
 ## What you can do
 
 ### 1. Design the cabinet
@@ -244,6 +351,13 @@ A few optional keys tune how the part presents itself — all safe to leave out:
 | `props.shortUnit` | Compact unit for the on-canvas reading (e.g. `µmol` for `µmol/m²/s`) | `props.unit` |
 | `sensorLabels` | `{ on, off }` wording on a 3-wire sensor's toggle button | `TARGET DETECTED` / `NO TARGET` |
 | `switchLabels` | `{ closed, open }` wording on a dry-contact switch's toggle button | `ON` / `OFF` |
+| `registers` | Readings an RS-485 device reports, one entry per Modbus register | — |
+| `busPort` | `{ a, b }` naming a controller's RS-485 terminals — makes it a Modbus master | — |
+| `relayContacts` | `[{ tag, a, b }]` — a true tag closes that volt-free contact pair | — |
+
+Two terminal `kind`s support this: `bus` is an RS-485 data line (carries no power),
+and `aio` is a configurable input that publishes a digital tag (`t.tag`) *and* an
+analog tag (`t.atag`) from the same pin.
 
 A reading that is too wide for its box is shrunk to fit automatically, so a long
 unit will not spill over the part.
